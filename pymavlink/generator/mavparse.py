@@ -255,6 +255,8 @@ class MAVXML(object):
             else:
                 m.ordered_fields = m.fields
             for f in m.fields:
+                f.name_variable = to_camel_case_variable(f.name)
+                f.name_class = to_camel_case_class(f.name)
                 m.fieldnames.append(f.name)
                 L = f.array_length
                 if L == 0:
@@ -264,6 +266,8 @@ class MAVXML(object):
                 else:
                     m.fieldlengths.append(L)
             for f in m.ordered_fields:
+                f.name_variable = to_camel_case_variable(f.name)
+                f.name_class = to_camel_case_class(f.name)
                 f.wire_offset = m.wire_length
                 m.wire_length += f.wire_length
                 m.ordered_fieldnames.append(f.name)
@@ -378,6 +382,18 @@ def mkdir_p(dir):
         if exc.errno == errno.EEXIST:
             pass
         else: raise
+
+def to_camel_case_variable(snake_str):
+    components = snake_str.split('_')
+    # We capitalize the first letter of each component except the first one
+    # with the 'title' method and join them together.
+    return components[0] + "".join(x.title() for x in components[1:])
+
+def to_camel_case_class(snake_str):
+    components = snake_str.split('_')
+    # We capitalize the first letter of each component except the first one
+    # with the 'title' method and join them together.
+    return components[0].title() + "".join(x.title() for x in components[1:])
 
 # check version consistent
 # add test.xml

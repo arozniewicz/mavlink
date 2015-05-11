@@ -11,22 +11,37 @@ from . import mavparse, mavtemplate
 
 t = mavtemplate.MAVTemplate()
 
+def to_camel_case_variable(snake_str):
+    components = snake_str.split('_')
+    # We capitalize the first letter of each component except the first one
+    # with the 'title' method and join them together.
+    return components[0] + "".join(x.title() for x in components[1:])
+
+def to_camel_case_class(snake_str):
+    components = snake_str.split('_')
+    # We capitalize the first letter of each component except the first one
+    # with the 'title' method and join them together.
+    return components[0].title() + "".join(x.title() for x in components[1:])
+
 def generate_enums(basename, xml):
     '''generate main header per XML file'''
     directory = os.path.join(basename, '''enums''')
     mavparse.mkdir_p(directory)
     for en in xml.enum:
-        f = open(os.path.join(directory, en.name+".java"), mode='w')
+        en.class_camel_case = to_camel_case_class(en.name.lower())
+        f = open(os.path.join(directory, en.class_camel_case+".java"), mode='w')
         t.write(f, '''
-            /** ${description}
-            */
-            package com.MAVLink.enums;
-            
-            public class ${name} {
-            ${{entry:	public static final int ${name} = ${value}; /* ${description} |${{param:${description}| }} */
-            }}
-            }
-            ''', en)
+/** 
+* ${description}
+*/
+package pl.droidsonroids.drones.model.embedded.enums;
+
+public class ${class_camel_case} {
+${{entry:
+    public static final int ${name} = ${value}; /* ${description} |${{param:${description}| }} */
+}}
+}
+''', en)
         f.close()
 
 
@@ -39,319 +54,326 @@ def generate_CRC(directory, xml):
     xml.message_crcs_array = xml.message_crcs_array[:-2]
     
     f = open(os.path.join(directory, "CRC.java"), mode='w')
+    path=directory.split('/')
     t.write(f,'''
-        package com.MAVLink.${basename};
-        
-        /**
-        * X.25 CRC calculation for MAVlink messages. The checksum must be initialized,
-        * updated with witch field of the message, and then finished with the message
-        * id.
-        *
-        */
-        public class CRC {
-        private final int[] MAVLINK_MESSAGE_CRCS = {${message_crcs_array}};
-        private static final int CRC_INIT_VALUE = 0xffff;
-        private int CRCvalue;
-        
-        /**
-        * Accumulate the X.25 CRC by adding one char at a time.
-        *
-        * The checksum function adds the hash of one char at a time to the 16 bit
-        * checksum (uint16_t).
-        *
-        * @param data
-        *            new char to hash
-        * @param crcAccum
-        *            the already accumulated checksum
-        **/
-        public  void update_checksum(int data) {
-		int tmp;
-		data= data & 0xff;	//cast because we want an unsigned type
-		tmp = data ^ (CRCvalue & 0xff);
-		tmp ^= (tmp << 4) & 0xff;
-		CRCvalue = ((CRCvalue >> 8) & 0xff) ^ (tmp << 8) ^ (tmp << 3)
-        ^ ((tmp >> 4) & 0xf);
-        }
-        
-        /**
-        * Finish the CRC calculation of a message, by running the CRC with the
-        * Magic Byte. This Magic byte has been defined in MAVlink v1.0.
-        *
-        * @param msgid
-        *            The message id number
-        */
-        public  void finish_checksum(int msgid) {
-		update_checksum(MAVLINK_MESSAGE_CRCS[msgid]);
-        }
-        
-        /**
-        * Initialize the buffer for the X.25 CRC
-        *
-        */
-        public void start_checksum() {
-		CRCvalue = CRC_INIT_VALUE;
-        }
-        
-        public int getMSB() {
-		return ((CRCvalue >> 8) & 0xff);
-        }
-        
-        public int getLSB() {
-		return (CRCvalue & 0xff);
-        }
-        
-        public CRC() {
-		start_checksum();
-        }
-        
-        }
-        ''',xml)
+package pl.droidsonroids.drones.model.embedded.%s;
+
+/**
+ * X.25 CRC calculation for MAVlink messages. The checksum must be initialized,
+ * updated with witch field of the message, and then finished with the message
+ * id.
+ */
+public class CRC {
+
+    private static final int CRC_INIT_VALUE = 0xffff;
+
+    private final int[] MAVLINK_MESSAGE_CRCS = {${message_crcs_array}};
+    
+    private int crcValue;
+
+    public CRC() {
+        startChecksum();
+    }
+
+    /**
+     * Initialize the buffer for the X.25 CRC
+     */
+    public void startChecksum() {
+        crcValue = CRC_INIT_VALUE;
+    }
+
+    /**
+     * Finish the CRC calculation of a message, by running the CRC with the
+     * Magic Byte. This Magic byte has been defined in MAVlink v1.0.
+     *
+     * @param messageId The message id number
+     */
+    public void finishChecksum(int messageId) {
+        updateChecksum(MAVLINK_MESSAGE_CRCS[messageId]);
+    }
+
+    /**
+     * Accumulate the X.25 CRC by adding one char at a time.
+     * <p>
+     * The checksum function adds the hash of one char at a time to the 16 bit
+     * checksum (uint16_t).
+     *
+     * @param data new char to hash
+     */
+    public void updateChecksum(int data) {
+        int tmp;
+        data = data & 0xff;    //cast because we want an unsigned type
+        tmp = data ^ (crcValue & 0xff);
+        tmp ^= (tmp << 4) & 0xff;
+        crcValue = ((crcValue >> 8) & 0xff) ^ (tmp << 8) ^ (tmp << 3) ^ ((tmp >> 4) & 0xf);
+    }
+
+    public int getMSB() {
+        return ((crcValue >> 8) & 0xff);
+    }
+
+    public int getLSB() {
+        return (crcValue & 0xff);
+    }
+}
+        ''' % path[len(path)-1], xml)
     
     f.close()
 
 
 def generate_message_h(directory, m):
     '''generate per-message header for a XML file'''
-    f = open(os.path.join(directory, 'msg_%s.java' % m.name_lower), mode='w')
+    m.variable_camel_case = to_camel_case_variable(m.name_lower)
+    m.class_camel_case = to_camel_case_class(m.name_lower)
+    f = open(os.path.join(directory, '%sMessage.java' % m.class_camel_case), mode='w')
 
     path=directory.split('/')
     t.write(f, '''
-        // MESSAGE ${name} PACKING
-package com.MAVLink.%s;
-import com.MAVLink.MAVLinkPacket;
-import com.MAVLink.Messages.MAVLinkMessage;
-import com.MAVLink.Messages.MAVLinkPayload;
-        //import android.util.Log;
-        
-        /**
-        * ${description}
-        */
-        public class msg_${name_lower} extends MAVLinkMessage{
-        
-        public static final int MAVLINK_MSG_ID_${name} = ${id};
-        public static final int MAVLINK_MSG_LENGTH = ${wire_length};
-        private static final long serialVersionUID = MAVLINK_MSG_ID_${name};
-        
-        
-        ${{ordered_fields: 	/**
-        * ${description}
-        */
-        public ${type} ${name}${array_suffix};
+package pl.droidsonroids.drones.model.embedded.%s;
+
+//import android.util.Log;
+
+import pl.droidsonroids.drones.model.embedded.MAVLinkPacket;
+import pl.droidsonroids.drones.model.embedded.message.MAVLinkMessage;
+import pl.droidsonroids.drones.model.embedded.message.MAVLinkPayload;
+
+/**
+* ${description}
+*/
+public class ${class_camel_case}Message extends MAVLinkMessage {
+    
+    public static final int MAVLINK_MSG_ID_${name} = ${id};
+    public static final int MAVLINK_MSG_LENGTH = ${wire_length};
+
+    private static final long serialVersionUID = MAVLINK_MSG_ID_${name};
+    
+    ${{ordered_fields:/**
+    * ${description}
+    */
+    private ${type}${array_suffix_2} ${name_variable}${array_generator};
+    }}
+    /**
+    * Generates the payload for a mavlink message for a message of this type
+    * @return
+    */
+    public MAVLinkPacket pack() {
+        MAVLinkPacket packet = new MAVLinkPacket();
+        packet.messageLength = MAVLINK_MSG_LENGTH;
+        packet.systemId = 255;
+        packet.componentId = 190;
+        packet.messageId = MAVLINK_MSG_ID_${name};
+        ${{ordered_fields:${packField}
         }}
-        
-        /**
-        * Generates the payload for a mavlink message for a message of this type
-        * @return
-        */
-        public MAVLinkPacket pack(){
-		MAVLinkPacket packet = new MAVLinkPacket();
-		packet.len = MAVLINK_MSG_LENGTH;
-		packet.sysid = 255;
-		packet.compid = 190;
-		packet.msgid = MAVLINK_MSG_ID_${name};
-        ${{ordered_fields:		${packField}
-        }}
-		return packet;
-        }
-        
-        /**
-        * Decode a ${name_lower} message into this class fields
-        *
-        * @param payload The message to decode
-        */
-        public void unpack(MAVLinkPayload payload) {
+        return packet;
+    }
+    
+    /**
+    * Decode a ${name_lower} message into this class fields
+    *
+    * @param payload The message to decode
+    */
+    public void unpack(MAVLinkPayload payload) {
         payload.resetIndex();
-        ${{ordered_fields:	    ${unpackField}
+        ${{ordered_fields:${unpackField}
         }}
-        }
-        
-        /**
-        * Constructor for a new message, just initializes the msgid
-        */
-        public msg_${name_lower}(){
-    	msgid = MAVLINK_MSG_ID_${name};
-        }
-        
-        /**
-        * Constructor for a new message, initializes the message with the payload
-        * from a mavlink packet
-        *
-        */
-        public msg_${name_lower}(MAVLinkPacket mavLinkPacket){
-        this.sysid = mavLinkPacket.sysid;
-        this.compid = mavLinkPacket.compid;
-        this.msgid = MAVLINK_MSG_ID_${name};
+    }
+    
+    /**
+    * Constructor for a new message, just initializes the messageId
+    */
+    public ${class_camel_case}Message() {
+        messageId = MAVLINK_MSG_ID_${name};
+    }
+    
+    /**
+    * Constructor for a new message, initializes the message with the payload
+    * from a mavlink packet
+    *
+    */
+    public ${class_camel_case}Message(MAVLinkPacket mavLinkPacket) {
+        this.systemId = mavLinkPacket.systemId;
+        this.componentId = mavLinkPacket.componentId;
+        this.messageId = MAVLINK_MSG_ID_${name};
         unpack(mavLinkPacket.payload);
         //Log.d("MAVLink", "${name}");
         //Log.d("MAVLINK_MSG_ID_${name}", toString());
-        }
-        
-        ${{ordered_fields: ${getText} }}
-        /**
-        * Returns a string with the MSG name and data
-        */
-        public String toString(){
-    	return "MAVLINK_MSG_ID_${name} -"+${{ordered_fields:" ${name}:"+${name}+}}"";
-        }
-        }
+    }
+    ${{ordered_fields: ${getText} }}       
+    ${{ordered_fields:
+    public void set${name_class}(${type}${array_suffix_2} ${name_variable}) {
+        this.${name_variable} = ${name_variable};
+    }
+
+    public ${type}${array_suffix_2} get${name_class}() {
+        return ${name_variable};
+    }
+    }}
+    /**
+    * Returns a string with the MSG name and data
+    */
+    public String toString() {
+        return "MAVLINK_MSG_ID_${name} -"+${{ordered_fields:" ${name_variable}:"+${name_variable}+}}"";
+    }
+}
         ''' % path[len(path)-1], m)
     f.close()
 
 
 def generate_MAVLinkMessage(directory, xml_list):
     f = open(os.path.join(directory, "MAVLinkPacket.java"), mode='w')
-    f.write('''package com.MAVLink;
-        
-        import java.io.Serializable;
-        import com.MAVLink.Messages.MAVLinkPayload;
-       	import com.MAVLink.Messages.MAVLinkMessage;
-     	import com.MAVLink.ardupilotmega.CRC;
-        import com.MAVLink.common.*;
-        import com.MAVLink.ardupilotmega.*;
-        
-        /**
-        * Common interface for all MAVLink Messages
-        * Packet Anatomy
-        * This is the anatomy of one packet. It is inspired by the CAN and SAE AS-4 standards.
-        
-        * Byte Index  Content              Value       Explanation
-        * 0            Packet start sign  v1.0: 0xFE   Indicates the start of a new packet.  (v0.9: 0x55)
-        * 1            Payload length      0 - 255     Indicates length of the following payload.
-        * 2            Packet sequence     0 - 255     Each component counts up his send sequence. Allows to detect packet loss
-        * 3            System ID           1 - 255     ID of the SENDING system. Allows to differentiate different MAVs on the same network.
-        * 4            Component ID        0 - 255     ID of the SENDING component. Allows to differentiate different components of the same system, e.g. the IMU and the autopilot.
-        * 5            Message ID          0 - 255     ID of the message - the id defines what the payload means and how it should be correctly decoded.
-        * 6 to (n+6)   Payload             0 - 255     Data of the message, depends on the message id.
-        * (n+7)to(n+8) Checksum (low byte, high byte)  ITU X.25/SAE AS-4 hash, excluding packet start sign, so bytes 1..(n+6) Note: The checksum also includes MAVLINK_CRC_EXTRA (Number computed from message fields. Protects the packet from decoding a different version of the same packet but with different variables).
-        
-        * The checksum is the same as used in ITU X.25 and SAE AS-4 standards (CRC-16-CCITT), documented in SAE AS5669A. Please see the MAVLink source code for a documented C-implementation of it. LINK TO CHECKSUM
-        * The minimum packet length is 8 bytes for acknowledgement packets without payload
-        * The maximum packet length is 263 bytes for full payload
-        *
-        */
-        public class MAVLinkPacket implements Serializable {
-        private static final long serialVersionUID = 2095947771227815314L;
-        
-        public static final int MAVLINK_STX = 254;
-        
-        /**
-        * Message length. NOT counting STX, LENGTH, SEQ, SYSID, COMPID, MSGID, CRC1 and CRC2
-        */
-        public int len;
-        /**
-        * Message sequence
-        */
-        public int seq;
-        /**
-        * ID of the SENDING system. Allows to differentiate different MAVs on the
-        * same network.
-        */
-        public int sysid;
-        /**
-        * ID of the SENDING component. Allows to differentiate different components
-        * of the same system, e.g. the IMU and the autopilot.
-        */
-        public int compid;
-        /**
-        * ID of the message - the id defines what the payload means and how it
-        * should be correctly decoded.
-        */
-        public int msgid;
-        /**
-        * Data of the message, depends on the message id.
-        */
-        public MAVLinkPayload payload;
-        /**
-        * ITU X.25/SAE AS-4 hash, excluding packet start sign, so bytes 1..(n+6)
-        * Note: The checksum also includes MAVLINK_CRC_EXTRA (Number computed from
-        * message fields. Protects the packet from decoding a different version of
-        * the same packet but with different variables).
-        */
-        public CRC crc;
-        
-        public MAVLinkPacket(){
-		payload = new MAVLinkPayload();
-        }
-        
-        /**
-        * Check if the size of the Payload is equal to the "len" byte
-        */
-        public boolean payloadIsFilled() {
-		if (payload.size() >= MAVLinkPayload.MAX_PAYLOAD_SIZE-1) {
-        return true;
-		}
-		return (payload.size() == len);
-        }
-        
-        /**
-        * Update CRC for this packet.
-        */
-        public void generateCRC(){
-		crc = new CRC();
-		crc.update_checksum(len);
-		crc.update_checksum(seq);
-		crc.update_checksum(sysid);
-		crc.update_checksum(compid);
-		crc.update_checksum(msgid);
-		payload.resetIndex();
-		for (int i = 0; i < payload.size(); i++) {
-        crc.update_checksum(payload.getByte());
-		}
-		crc.finish_checksum(msgid);
-        }
-        
-        /**
-        * Encode this packet for transmission.
-        *
-        * @return Array with bytes to be transmitted
-        */
-        public byte[] encodePacket() {
-		byte[] buffer = new byte[6 + len + 2];
-		int i = 0;
-		buffer[i++] = (byte) MAVLINK_STX;
-		buffer[i++] = (byte) len;
-		buffer[i++] = (byte) seq;
-		buffer[i++] = (byte) sysid;
-		buffer[i++] = (byte) compid;
-		buffer[i++] = (byte) msgid;
-		for (int j = 0; j < payload.size(); j++) {
-        buffer[i++] = payload.payload.get(j);
-		}
-		generateCRC();
-		buffer[i++] = (byte) (crc.getLSB());
-		buffer[i++] = (byte) (crc.getMSB());
-		return buffer;
-        }
-        
-        /**
-        * Unpack the data in this packet and return a MAVLink message
-        *
-        * @return MAVLink message decoded from this packet
-        */
-        public MAVLinkMessage unpack() {
-		switch (msgid) {
-        ''')
+    f.write('''
+package pl.droidsonroids.drones.model.embedded;
+
+import java.io.Serializable;
+
+import pl.droidsonroids.drones.model.embedded.message.MAVLinkMessage;
+import pl.droidsonroids.drones.model.embedded.message.MAVLinkPayload;
+''')
+
     for xml in xml_list:
         t.write(f, '''
-            ${{message:		case msg_${name_lower}.MAVLINK_MSG_ID_${name}:
-			return  new msg_${name_lower}(this);
-            }}
-            ''',xml)
-    f.write('''		default:
-        return null;
-		}
+import pl.droidsonroids.drones.model.embedded.${basename}.*;''',xml)
+
+    f.write('''
+
+/**
+ * Common interface for all MAVLink Messages
+ * Packet Anatomy
+ * This is the anatomy of one packet. It is inspired by the CAN and SAE AS-4 standards.
+ * <p>
+ * Byte Index  Content              Value       Explanation
+ * 0            Packet start sign  v1.0: 0xFE   Indicates the start of a new packet.  (v0.9: 0x55)
+ * 1            Payload length      0 - 255     Indicates length of the following payload.
+ * 2            Packet sequence     0 - 255     Each component counts up his send sequence. Allows to detect packet loss
+ * 3            System ID           1 - 255     ID of the SENDING system. Allows to differentiate different MAVs on the same network.
+ * 4            Component ID        0 - 255     ID of the SENDING component. Allows to differentiate different components of the same system, e.g. the IMU and the autopilot.
+ * 5            Message ID          0 - 255     ID of the message - the id defines what the payload means and how it should be correctly decoded.
+ * 6 to (n+6)   Payload             0 - 255     Data of the message, depends on the message id.
+ * (n+7)to(n+8) Checksum (low byte, high byte)  ITU X.25/SAE AS-4 hash, excluding packet start sign, so bytes 1..(n+6) Note: The checksum also includes MAVLINK_CRC_EXTRA (Number computed from message fields. Protects the packet from decoding a different version of the same packet but with different variables).
+ * <p>
+ * The checksum is the same as used in ITU X.25 and SAE AS-4 standards (CRC-16-CCITT), documented in SAE AS5669A. Please see the MAVLink source code for a documented C-implementation of it. LINK TO CHECKSUM
+ * The minimum packet length is 8 bytes for acknowledgement packets without payload
+ * The maximum packet length is 263 bytes for full payload
+ */
+public class MAVLinkPacket implements Serializable {
+    private static final long serialVersionUID = 2095947771227815314L;
+
+    public static final int MAVLINK_STX = 254;
+
+    /**
+     * Message length. NOT counting STX, LENGTH, SEQ, SYSID, COMPID, MSGID, CRC1 and CRC2
+     */
+    public int messageLength;
+    /**
+     * Message sequence
+     */
+    public int messageSequence;
+    /**
+     * ID of the SENDING system. Allows to differentiate different MAVs on the
+     * same network.
+     */
+    public int systemId;
+    /**
+     * ID of the SENDING component. Allows to differentiate different components
+     * of the same system, e.g. the IMU and the autopilot.
+     */
+    public int componentId;
+    /**
+     * ID of the message - the id defines what the payload means and how it
+     * should be correctly decoded.
+     */
+    public int messageId;
+    /**
+     * Data of the message, depends on the message id.
+     */
+    public MAVLinkPayload payload;
+    /**
+     * ITU X.25/SAE AS-4 hash, excluding packet start sign, so bytes 1..(n+6)
+     * Note: The checksum also includes MAVLINK_CRC_EXTRA (Number computed from
+     * message fields. Protects the packet from decoding a different version of
+     * the same packet but with different variables).
+     */
+    public CRC crc;
+
+    public MAVLinkPacket() {
+        payload = new MAVLinkPayload();
+    }
+
+    /**
+     * Check if the size of the Payload is equal to the "messageLength" byte
+     */
+    public boolean isPayloadFilled() {
+        return payload.size() >= MAVLinkPayload.MAX_PAYLOAD_SIZE - 1 || (payload.size() == messageLength);
+    }
+
+    /**
+     * Update CRC for this packet.
+     */
+    public void generateCRC() {
+        crc = new CRC();
+        crc.updateChecksum(messageLength);
+        crc.updateChecksum(messageSequence);
+        crc.updateChecksum(systemId);
+        crc.updateChecksum(componentId);
+        crc.updateChecksum(messageId);
+        payload.resetIndex();
+        for (int i = 0; i < payload.size(); ++i) {
+            crc.updateChecksum(payload.getByte());
         }
-        
+        crc.finishChecksum(messageId);
+    }
+
+    /**
+     * Encode this packet for transmission.
+     *
+     * @return Array with bytes to be transmitted
+     */
+    public byte[] encodePacket() {
+        byte[] buffer = new byte[6 + messageLength + 2];
+        int i = 0;
+        buffer[i++] = (byte) MAVLINK_STX;
+        buffer[i++] = (byte) messageLength;
+        buffer[i++] = (byte) messageSequence;
+        buffer[i++] = (byte) systemId;
+        buffer[i++] = (byte) componentId;
+        buffer[i++] = (byte) messageId;
+        for (int j = 0; j < payload.size(); ++j) {
+            buffer[i++] = payload.payload.get(j);
         }
-        
-        ''')
+        generateCRC();
+        buffer[i++] = (byte) (crc.getLSB());
+        buffer[i++] = (byte) (crc.getMSB());
+        return buffer;
+    }
+
+    /**
+     * Unpack the data in this packet and return a MAVLink message
+     *
+     * @return MAVLink message decoded from this packet
+     */
+    public MAVLinkMessage unpack() {
+        switch (messageId) {
+''')
+
+    for xml in xml_list:
+        t.write(f, '''${{message:
+            case ${class_camel_case}Message.MAVLINK_MSG_ID_${name}:
+                return new ${class_camel_case}Message(this);}}''', xml)
+
+    f.write('''
+            default:
+                return null;
+        }
+    }
+}
+''')
     
     f.close()
 
 def copy_fixed_headers(directory, xml):
     '''copy the fixed protocol headers to the target directory'''
     import shutil
-    hlist = [ 'Parser.java', 'Messages/MAVLinkMessage.java', 'Messages/MAVLinkPayload.java', 'Messages/MAVLinkStats.java' ]
+    hlist = [ 'Parser.java', 'message/MAVLinkMessage.java', 'message/MAVLinkPayload.java', 'message/MAVLinkStats.java' ]
     basepath = os.path.dirname(os.path.realpath(__file__))
     srcpath = os.path.join(basepath, 'java/lib')
     print("Copying fixed headers")
@@ -360,7 +382,7 @@ def copy_fixed_headers(directory, xml):
         dest = os.path.realpath(os.path.join(directory, h))
         if src == dest:
             continue
-        destdir = os.path.realpath(os.path.join(directory, 'Messages'))
+        destdir = os.path.realpath(os.path.join(directory, 'message'))
         try:
             os.makedirs(destdir)
         except:
@@ -454,6 +476,8 @@ def generate_one(basename, xml):
                 f.c_print_format = '"%s"' % f.print_format
             f.getText = ''
             if f.array_length != 0:
+                f.array_suffix_2 = '[]'
+                f.array_generator = ' = new %s[%u]' % (mavfmt(f),f.array_length)
                 f.array_suffix = '[] = new %s[%u]' % (mavfmt(f),f.array_length)
                 f.array_prefix = '*'
                 f.array_tag = '_array'
@@ -463,49 +487,54 @@ def generate_one(basename, xml):
                 f.decode_left = ''
                 f.decode_right = 'm.%s' % (f.name)
                 
-                f.unpackField = ''' for (int i = 0; i < this.%s.length; i++) {
-                    this.%s[i] = payload.get%s();
-                    }''' % (f.name, f.name, mavfmt(f).title() )
-                f.packField = ''' for (int i = 0; i < %s.length; i++) {
-                    packet.payload.put%s(%s[i]);
-                    }''' % (f.name, mavfmt(f).title(),f.name)
+                f.unpackField = '''for (int i = 0; i < this.%s.length; ++i) {
+            this.%s[i] = payload.get%s();
+        }''' % (f.name_variable, f.name_variable, mavfmt(f).title())
+
+                f.packField = '''for (int i = 0; i < %s.length; ++i) {
+            packet.payload.put%s(%s[i]);
+        }''' % (f.name_variable, mavfmt(f).title(),f.name_variable)
+
                 f.return_type = 'uint16_t'
                 f.get_arg = ', %s *%s' % (f.type, f.name)
                 if f.type == 'char':
                     f.c_test_value = '"%s"' % f.test_value
-                    f.getText = '''/**
-                        * Sets the buffer of this message with a string, adds the necessary padding
-                        */
-                        public void set%s(String str) {
-                        int len = Math.min(str.length(), %d);
-                        for (int i=0; i<len; i++) {
-                        %s[i] = (byte) str.charAt(i);
-                        }
-                        for (int i=len; i<%d; i++) {			// padding for the rest of the buffer
-                        %s[i] = 0;
-                        }
-                        }
-                        
-                        /**
-                        * Gets the message, formated as a string
-                        */
-                        public String get%s() {
-                        String result = "";
-                        for (int i = 0; i < %d; i++) {
-                        if (%s[i] != 0)
-                        result = result + (char) %s[i];
-                        else
-                        break;
-                        }
-                        return result;
-                        
-                        }''' % (f.name.title(),f.array_length,f.name,f.array_length,f.name,f.name.title(),f.array_length,f.name,f.name)
+                    f.getText = '''
+    /**
+    * Sets the buffer of this message with a string, adds the necessary padding
+    */
+    public void set%s(String str) {
+        int len = Math.min(str.length(), %d);
+        for (int i = 0; i < len; ++i) {
+            %s[i] = (byte) str.charAt(i);
+        }
+        for (int i = len; i < %d; ++i) {			// padding for the rest of the buffer
+            %s[i] = 0;
+        }
+    }
+
+    /**
+    * Gets the message, formated as a string
+    */
+    public String get%sAsString() {
+        String result = "";
+        for (int i = 0; i < %d; ++i) {
+            if (%s[i] != 0) {
+                result = result + (char) %s[i];
+            } else {
+                break;
+            }
+        }
+        return result;
+    }''' % (f.name_class,f.array_length,f.name_variable,f.array_length,f.name_variable,f.name_class,f.array_length,f.name_variable,f.name_variable)
                 else:
                     test_strings = []
                     for v in f.test_value:
                         test_strings.append(str(v))
                     f.c_test_value = '{ %s }' % ', '.join(test_strings)
             else:
+                f.array_suffix_2 = ''
+                f.array_generator = ''
                 f.array_suffix = ''
                 f.array_prefix = ''
                 f.array_tag = ''
@@ -514,8 +543,8 @@ def generate_one(basename, xml):
                 f.array_const = ''
                 f.decode_left =  '%s' % (f.name)
                 f.decode_right = ''
-                f.unpackField = 'this.%s = payload.get%s();' % (f.name, mavfmt(f).title())
-                f.packField = 'packet.payload.put%s(%s);' % (mavfmt(f).title(),f.name)                   
+                f.unpackField = 'this.%s = payload.get%s();' % (f.name_variable, mavfmt(f).title())
+                f.packField = 'packet.payload.put%s(%s);' % (mavfmt(f).title(),f.name_variable)                   
                 
                 
                 f.get_arg = ''
